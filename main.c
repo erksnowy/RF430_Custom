@@ -422,6 +422,7 @@ __interrupt void TimerA0_ISR(void)
     for (int z = 0; z < sizeof(GENERATED_DEMO_KEY); ++z) {
         RF13MTXF_H = GENERATED_DEMO_KEY[z]>>8;
         RF13MTXF_L = GENERATED_DEMO_KEY[z];
+
     }
 
     RF13MCTL |= RF13MTXEN;
