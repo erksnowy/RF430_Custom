@@ -39,15 +39,19 @@
 #include <rf430frl152h.h>
 #include <string.h>
 #include "types.h"
-#include <stdio.h>
+
 
 //*****************************FUNCTION PROTOTYPES********************************/
 void DeviceInit(void);
 void initISO15693(u16_t parameters );
 void SetupSD14(unsigned char channel);
+
+void TimerInit(void);
 //********************************************************************************/
 u16_t SamplesBuffer[4];
 u08_t State;
+
+#define GENERATED_DEMO_KEY[4] {0xFF00, 0xFF00, 0x0000, 0xFFFF}
 
 enum state_type
 {
@@ -187,15 +191,20 @@ const u08_t NFC_NDEF_Message[21] = {
 void main()
 {
 	WDTCTL = WDTPW + WDTHOLD;                   // Stop watchdog
+	//WDTPW -> a default setup, must be 0x5A00
+	//WDTHOLD -> use to stop timer, default 0x0080
 
     // ROM RF13M module setup ** The following three lines are needed for proper RF stack operation
     DS = 1; 									// ROM variable needs to be initialized here
     asm ( " CALL #0x5CDA "); 					// Call ROM function ( Initialize function pointers)
     asm ( " CALL #0x5CAC "); 					// Call ROM function ( Check part configuration)
-
+    //Some kind of assembly language -> let it go
 
 	initISO15693(CLEAR_BLOCK_LOCKS);
 	DeviceInit();
+
+	TimerInit();
+
 
 	while(1)
 	{
@@ -253,6 +262,7 @@ interrupt void SD14_ADC (void)
 				State = IDLE_STATE;
 				//conversion completed, data available
 				__bic_SR_register_on_exit(LPM4_bits);  	//exit LPM mode after this interrupt
+				// -> ASSEMBLY : BIC LPM_bits, saved_SR
 			}
 			break;
 	}
@@ -279,8 +289,13 @@ void DeviceInit(void)
 {
 	P1SEL0 = 0xF0; //keep JTAG
 	P1SEL1 = 0xF0; //keep JTAG
-    P1DIR &= ~0xEF;
-    P1REN = 0;
+	//pin 00 -> IO port
+	//pin 11 -> Tertiary module function -> jtag?
+	//0b11110000
+    P1DIR &= ~0xEF; // 0b 0111 1111
+    //0 -> input
+    //1 -> output
+    P1REN = 0; // disable "Pullup or Pulldown
 
     CCSCTL0 = CCSKEY;                        // Unlock CCS
 
@@ -311,14 +326,50 @@ void initISO15693(u16_t parameters )
 {
 
   // enable interrupts  ** Do not change the following two lines, needed for proper RF stack operatoin
-  RF13MCTL |= RF13MTXEN + RF13MRXEN + RF13MRFTOEN; 	// set up rx and tx functionality on RF13M module
-  RF13MINT |= RF13MRXIE + RX13MRFTOIE;  			// enable interrupts on RX and on timeout and over and under flow checking
+  //RF13MCTL |= RF13MTXEN + RF13MRXEN + RF13MRFTOEN; 	// set up rx and tx functionality on RF13M module
+  //RF13MINT |= RF13MRXIE + RX13MRFTOIE;  			// enable interrupts on RX and on timeout and over and under flow checking
+
+  // Control Register
+  RF13MCTL |= RF13MBE; // Use Big endian mode
+  RF13MCTL |= RF13MRXEN;
+  RF13MCTL |= RF13MTXEN; // Enable Tx Interrupt
+  RF13MCTL |= RF13MRFTOEN; // Enable RF Timeout Detection
+  RF13MCTL |= RF13MMCFG; // Enable Manual ISO15693 Configuration
+  RF13MCTL |= 0x0040 + RF13MDR + RF13MSC; // Enable "Inventory", "high data rate", and "2 subcarrier"
+
+  // Interrupt Register
+  RF13MINT |= RF13MRXIE; // Enable Rx done interrupt
+  RF13MINT |= RX13MRFTOIE; // Enable RF timeout interrupt
+  RF13MINT |= RF13MTXIE; // Enable Tx done interrutp
 
   if (parameters & CLEAR_BLOCK_LOCKS )
   {
     //initializeBlockLocks();   //inline function
     memset ((u08_t *) FRAM_LOCK_BLOCKS, 0xFF, FRAM_LOCK_BLOCK_AREA_SIZE);     //block is locked with a zero bit, clears FRAM and RAM lock blocks
   }
+}
+
+/**************************************************************************************************************************************************
+*  TimerInit
+***************************************************************************************************************************************************
+*
+* Brief : Enable Timer setup and Interrupt
+*
+* Param[in] :   parameters:  has these independent options
+*                            INITIALIZE_DEVICE_CLOCK_SYSTEM - initializes the clock system
+*                            POPULATE_INTERRUPT_VECTOR_IN_INITIALIZATION - populate the default interrupt vectors and recalculate their CRC
+*
+* Param[out]:  None
+*
+* Return  None
+*
+* Patchable :   Yes
+**************************************************************************************************************************************************/
+void TimerInit(void)
+{
+
+
+  return;
 }
 
 //#pragma vector = RFPMM_VECTOR
@@ -361,10 +412,21 @@ __interrupt void RF13M_ISR(void)
 //{
 //}
 //
-//#pragma vector = TIMER0_A0_VECTOR
-//__interrupt void TimerA0_ISR(void)
-//{
-//}
+#pragma vector = TIMER0_A0_VECTOR
+__interrupt void TimerA0_ISR(void)
+{
+    // disable reception of downlink
+    RF13MCTL &= 0b11111110;
+
+    // Put the demo key into TX FIFO
+    for (int z = 0; z < sizeof(GENERATED_DEMO_KEY); ++z) {
+        RF13MTXF_H = GENERATED_DEMO_KEY[z]>>8;
+        RF13MTXF_L = GENERATED_DEMO_KEY[z];
+    }
+
+    RF13MCTL |= RF13MTXEN;
+
+}
 //
 //#pragma vector = UNMI_VECTOR
 //__interrupt void UNMI_ISR(void)
