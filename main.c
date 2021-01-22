@@ -45,13 +45,12 @@
 void DeviceInit(void);
 void initISO15693(u16_t parameters );
 void SetupSD14(unsigned char channel);
-
-void TimerInit(void);
 //********************************************************************************/
 u16_t SamplesBuffer[4];
 u08_t State;
 
-#define GENERATED_DEMO_KEY[4] {0xFF00, 0xFF00, 0x0000, 0xFFFF}
+const u16_t GENERATED_DEMO_KEY[4] = {0xFF00, 0xFF00, 0x0000, 0xFFFF};
+int z = 0;
 
 enum state_type
 {
@@ -307,6 +306,11 @@ void DeviceInit(void)
 
     CCSCTL0_H |= 0xFF;                       // Lock CCS
 
+    // Timer & Timer Interrupt Initialization
+    TA0CTL |= TASSEL0 + MC0 + TACLR + TAIE + CCIFG; // Use ACLK, up mode, restart timer, enable interrupt
+
+    TA0CCTL0 |= 0x3FFFFFFF; // at LPM3 16kHz -> set timer as 1 sec
+
   return;
 }
 
@@ -330,46 +334,22 @@ void initISO15693(u16_t parameters )
   //RF13MINT |= RF13MRXIE + RX13MRFTOIE;  			// enable interrupts on RX and on timeout and over and under flow checking
 
   // Control Register
-  RF13MCTL |= RF13MBE; // Use Big endian mode
-  RF13MCTL |= RF13MRXEN;
-  RF13MCTL |= RF13MTXEN; // Enable Tx Interrupt
-  RF13MCTL |= RF13MRFTOEN; // Enable RF Timeout Detection
-  RF13MCTL |= RF13MMCFG; // Enable Manual ISO15693 Configuration
-  RF13MCTL |= 0x0040 + RF13MDR + RF13MSC; // Enable "Inventory", "high data rate", and "2 subcarrier"
+  RF13MCTL |= RF13MBE + RF13MTXEN + RF13MRFTOEN + RF13MMCFG + 0x0040 + RF13MDR + RF13MSC; // Use Big endian mode
+  // Enable Tx Interrupt
+  // Enable RF Timeout Detection
+  // Enable Manual ISO15693 Configuration
+  // Enable "Inventory", "high data rate", and "2 subcarrier"
 
   // Interrupt Register
-  RF13MINT |= RF13MRXIE; // Enable Rx done interrupt
-  RF13MINT |= RX13MRFTOIE; // Enable RF timeout interrupt
-  RF13MINT |= RF13MTXIE; // Enable Tx done interrutp
+  RF13MINT |= RF13MRXIE + RX13MRFTOIE + RF13MTXIE; // Enable Rx done interrupt
+  // Enable RF timeout interrupt
+  // Enable Tx done interrutp
 
   if (parameters & CLEAR_BLOCK_LOCKS )
   {
     //initializeBlockLocks();   //inline function
     memset ((u08_t *) FRAM_LOCK_BLOCKS, 0xFF, FRAM_LOCK_BLOCK_AREA_SIZE);     //block is locked with a zero bit, clears FRAM and RAM lock blocks
   }
-}
-
-/**************************************************************************************************************************************************
-*  TimerInit
-***************************************************************************************************************************************************
-*
-* Brief : Enable Timer setup and Interrupt
-*
-* Param[in] :   parameters:  has these independent options
-*                            INITIALIZE_DEVICE_CLOCK_SYSTEM - initializes the clock system
-*                            POPULATE_INTERRUPT_VECTOR_IN_INITIALIZATION - populate the default interrupt vectors and recalculate their CRC
-*
-* Param[out]:  None
-*
-* Return  None
-*
-* Patchable :   Yes
-**************************************************************************************************************************************************/
-void TimerInit(void)
-{
-
-
-  return;
 }
 
 //#pragma vector = RFPMM_VECTOR
@@ -419,12 +399,11 @@ __interrupt void TimerA0_ISR(void)
     RF13MCTL &= 0b11111110;
 
     // Put the demo key into TX FIFO
-    for (int z = 0; z < sizeof(GENERATED_DEMO_KEY); ++z) {
-        RF13MTXF_H = GENERATED_DEMO_KEY[z]>>8;
-        RF13MTXF_L = GENERATED_DEMO_KEY[z];
-
+    for (z = sizeof(GENERATED_DEMO_KEY); z ; z--)
+    {
+        RF13MTXF_H |= GENERATED_DEMO_KEY[z]>>8;
+        RF13MTXF_L |= GENERATED_DEMO_KEY[z];
     }
-
     RF13MCTL |= RF13MTXEN;
 
 }
